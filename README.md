@@ -133,11 +133,14 @@ set tracking_url = 'https://your-domain.com/r/' || slug;
 ## 7. 데이터베이스 스키마 요약
 
 ```text
-campaigns (id, name, hotel_name, channel, description, created_at)
-links     (id, campaign_id → campaigns, slug UNIQUE, original_url, tracking_url, created_at)
+campaigns (id, name, description, spend_amount, revenue_amount, currency, created_at)
+links     (id, campaign_id → campaigns, slug UNIQUE, channel, original_url, tracking_url, created_at)
 clicks    (id, link_id → links, clicked_at, user_agent, referrer, ip_hash,
            utm_source, utm_medium, utm_campaign)
 ```
+
+> 한 캠페인 아래 여러 링크(=채널별 QR)를 둘 수 있고, 각 링크는 자신의 `channel` 라벨을 가집니다.
+> `campaigns.spend_amount` 와 `revenue_amount` 로 CPC / ROI 가 계산됩니다.
 
 - `links.slug` 는 unique. 사용자가 직접 입력하면 충돌 시 409 응답, 자동 생성 시 최대 5회 재시도.
 - `clicks.ip_hash` 는 `sha256(IP_HASH_SALT + ip)` 의 앞 32자만 저장 (원본 IP는 저장하지 않음).

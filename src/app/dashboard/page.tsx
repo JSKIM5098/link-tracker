@@ -5,6 +5,7 @@ import { KpiCard } from "@/components/KpiCard";
 import { Card } from "@/components/Card";
 import { ClicksByDayChart, type DayPoint } from "@/components/ClicksByDayChart";
 import { CopyButton } from "@/components/CopyButton";
+import { QRModal } from "@/components/QRModal";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,19 +13,20 @@ export const revalidate = 0;
 type CampaignRow = {
   id: string;
   name: string;
-  hotel_name: string | null;
-  channel: string | null;
+  description: string | null;
+  spend_amount: number | null;
   created_at: string;
 };
 
 type LinkRow = {
   id: string;
   slug: string;
+  channel: string | null;
   original_url: string;
   tracking_url: string;
   created_at: string;
   campaign_id: string;
-  campaigns: { name: string; hotel_name: string | null; channel: string | null } | null;
+  campaigns: { name: string } | null;
 };
 
 type ClickRow = {
@@ -55,13 +57,13 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     supabase
       .from("campaigns")
-      .select("id, name, hotel_name, channel, created_at")
+      .select("id, name, description, spend_amount, created_at")
       .order("created_at", { ascending: false })
       .limit(20),
     supabase
       .from("links")
       .select(
-        "id, slug, original_url, tracking_url, created_at, campaign_id, campaigns(name, hotel_name, channel)"
+        "id, slug, channel, original_url, tracking_url, created_at, campaign_id, campaigns(name)"
       )
       .order("created_at", { ascending: false })
       .limit(50),
@@ -89,7 +91,6 @@ export default async function DashboardPage() {
   const rangeClicks =
     (rangeClicksRes.data ?? []) as { clicked_at: string; link_id: string }[];
 
-  // Build per-day series for the last 30 days
   const dayBuckets = new Map<string, number>();
   for (const d of lastNDays(30)) dayBuckets.set(d, 0);
   for (const c of rangeClicks) {
@@ -101,34 +102,27 @@ export default async function DashboardPage() {
     clicks,
   }));
 
-  // Per-link click counts (last 30d) — for the link list
   const perLinkCounts = new Map<string, number>();
   for (const c of rangeClicks) {
     perLinkCounts.set(c.link_id, (perLinkCounts.get(c.link_id) ?? 0) + 1);
   }
-
-  // Per-campaign click counts (last 30d) — derived from links
   const linkToCampaign = new Map(links.map((l) => [l.id, l.campaign_id]));
   const perCampaignCounts = new Map<string, number>();
   for (const c of rangeClicks) {
     const cid = linkToCampaign.get(c.link_id);
-    if (cid) {
-      perCampaignCounts.set(cid, (perCampaignCounts.get(cid) ?? 0) + 1);
-    }
+    if (cid) perCampaignCounts.set(cid, (perCampaignCounts.get(cid) ?? 0) + 1);
   }
 
-  // Map link_id -> tracking + campaign label for the recent clicks table
   const linkLabel = new Map(
     links.map((l) => [
       l.id,
       {
         slug: l.slug,
+        channel: l.channel,
         campaignName: l.campaigns?.name ?? "—",
       },
     ])
   );
-
-  const activeCampaigns = campaigns.length;
 
   return (
     <div className="space-y-6">
@@ -160,7 +154,7 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard label="전체 클릭" value={formatNumber(totalClicks)} />
         <KpiCard label="오늘 클릭" value={formatNumber(todayClicks)} />
-        <KpiCard label="활성 캠페인" value={formatNumber(activeCampaigns)} />
+        <KpiCard label="활성 캠페인" value={formatNumber(campaigns.length)} />
         <KpiCard label="활성 링크" value={formatNumber(links.length)} />
       </div>
 
@@ -179,25 +173,29 @@ export default async function DashboardPage() {
           ) : (
             <ul className="divide-y divide-slate-100">
               {campaigns.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-slate-900">
-                      {c.name}
+                <li key={c.id}>
+                  <Link
+                    href={`/dashboard/campaigns/${c.id}`}
+                    className="-mx-2 flex items-center justify-between gap-4 rounded-md px-2 py-3 transition hover:bg-slate-50"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900">
+                        {c.name}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {c.description || "—"}
+                      </div>
                     </div>
-                    <div className="truncate text-xs text-slate-500">
-                      {[c.hotel_name, c.channel].filter(Boolean).join(" · ") ||
-                        "—"}
+                    <div className="flex flex-shrink-0 items-center gap-3 text-right">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {formatNumber(perCampaignCounts.get(c.id) ?? 0)}
+                        </div>
+                        <div className="text-[11px] text-slate-400">최근 30일</div>
+                      </div>
+                      <span className="text-slate-300">›</span>
                     </div>
-                  </div>
-                  <div className="flex flex-shrink-0 items-center gap-3 text-right">
-                    <div className="text-sm font-semibold text-slate-900">
-                      {formatNumber(perCampaignCounts.get(c.id) ?? 0)}
-                    </div>
-                    <div className="text-[11px] text-slate-400">최근 30일</div>
-                  </div>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -216,7 +214,12 @@ export default async function DashboardPage() {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-slate-900">
-                      {l.campaigns?.name ?? "—"}{" "}
+                      <span>{l.campaigns?.name ?? "—"}</span>
+                      {l.channel ? (
+                        <span className="ml-2 rounded bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-700">
+                          {l.channel}
+                        </span>
+                      ) : null}{" "}
                       <span className="text-slate-400">/</span>{" "}
                       <span className="font-mono text-brand-600">
                         /r/{l.slug}
@@ -231,6 +234,13 @@ export default async function DashboardPage() {
                       {formatNumber(perLinkCounts.get(l.id) ?? 0)}
                     </span>
                     <CopyButton value={l.tracking_url} />
+                    <QRModal
+                      url={l.tracking_url}
+                      filename={l.slug}
+                      label={`${l.campaigns?.name ?? ""}${
+                        l.channel ? ` · ${l.channel}` : ""
+                      }`}
+                    />
                   </div>
                 </li>
               ))}
@@ -249,13 +259,10 @@ export default async function DashboardPage() {
                 <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                   <th className="px-5 py-2 font-medium sm:px-0">시각</th>
                   <th className="px-5 py-2 font-medium sm:px-0">캠페인</th>
+                  <th className="px-5 py-2 font-medium sm:px-0">채널</th>
                   <th className="px-5 py-2 font-medium sm:px-0">링크</th>
-                  <th className="hidden px-5 py-2 font-medium md:table-cell">
-                    유입
-                  </th>
-                  <th className="hidden px-5 py-2 font-medium md:table-cell">
-                    User Agent
-                  </th>
+                  <th className="hidden px-5 py-2 font-medium md:table-cell">유입</th>
+                  <th className="hidden px-5 py-2 font-medium md:table-cell">User Agent</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -268,6 +275,9 @@ export default async function DashboardPage() {
                       </td>
                       <td className="whitespace-nowrap px-5 py-2 sm:px-0">
                         {meta?.campaignName ?? "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-2 sm:px-0">
+                        {meta?.channel ?? "—"}
                       </td>
                       <td className="whitespace-nowrap px-5 py-2 font-mono text-brand-600 sm:px-0">
                         /r/{meta?.slug ?? "?"}

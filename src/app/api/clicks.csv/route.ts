@@ -14,9 +14,10 @@ type ClickRow = {
   utm_campaign: string | null;
   links: {
     slug: string;
+    channel: string | null;
     original_url: string;
     tracking_url: string;
-    campaigns: { name: string; hotel_name: string | null; channel: string | null } | null;
+    campaigns: { name: string } | null;
   } | null;
 };
 
@@ -32,7 +33,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("clicks")
     .select(
-      "clicked_at, user_agent, referrer, ip_hash, utm_source, utm_medium, utm_campaign, links(slug, original_url, tracking_url, campaigns(name, hotel_name, channel))"
+      "clicked_at, user_agent, referrer, ip_hash, utm_source, utm_medium, utm_campaign, links(slug, channel, original_url, tracking_url, campaigns(name))"
     )
     .order("clicked_at", { ascending: false })
     .limit(10000);
@@ -46,7 +47,6 @@ export async function GET() {
   const header = [
     "clicked_at",
     "campaign_name",
-    "hotel_name",
     "channel",
     "slug",
     "tracking_url",
@@ -65,8 +65,7 @@ export async function GET() {
       [
         r.clicked_at,
         r.links?.campaigns?.name,
-        r.links?.campaigns?.hotel_name,
-        r.links?.campaigns?.channel,
+        r.links?.channel,
         r.links?.slug,
         r.links?.tracking_url,
         r.links?.original_url,

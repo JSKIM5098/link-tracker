@@ -13,6 +13,19 @@ export function formatNumber(n: number): string {
   return n.toLocaleString("ko-KR");
 }
 
+export function formatMoney(n: number | null | undefined, currency = "KRW"): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  try {
+    return new Intl.NumberFormat("ko-KR", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(n);
+  } catch {
+    return `${formatNumber(n)} ${currency}`;
+  }
+}
+
 export function ymd(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");

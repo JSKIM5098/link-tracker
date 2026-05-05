@@ -6,16 +6,21 @@ import { trackingUrlFor } from "@/lib/site";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type Body = {
-  name?: string;
-  description?: string | null;
-  original_url?: string;
   channel?: string | null;
+  original_url?: string;
   slug?: string;
-  spend_amount?: number | null;
 };
 
-export async function POST(req: Request) {
+export async function POST(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  if (!UUID_RE.test(params.id))
+    return NextResponse.json({ error: "Invalid campaign id" }, { status: 400 });
+
   let body: Body;
   try {
     body = await req.json();
@@ -23,11 +28,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const name = body.name?.trim();
-  const originalUrl = body.original_url?.trim();
-  if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
+  const supabase = supabaseServer();
+
+  // Look up the campaign + its existing primary link to inherit original_url.
+  const { data: existing, error: existingErr } = await supabase
+    .from("campaigns")
+    .select("id, links(original_url, created_at)")
+    .eq("id", params.id)
+    .maybeSingle();
+
+  if (existingErr || !existing) {
+    return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+  }
+
+  // Pick a default destination URL: explicit body wins, else the oldest existing link.
+  let originalUrl = body.original_url?.trim();
+  if (!originalUrl) {
+    const links =
+      (existing as { links?: { original_url: string; created_at: string }[] }).links ?? [];
+    const sorted = [...links].sort((a, b) =>
+      a.created_at.localeCompare(b.created_at)
+    );
+    originalUrl = sorted[0]?.original_url;
+  }
   if (!originalUrl)
-    return NextResponse.json({ error: "original_url is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "original_url is required for the first link" },
+      { status: 400 }
+    );
 
   try {
     const u = new URL(originalUrl);
@@ -44,25 +72,6 @@ export async function POST(req: Request) {
     );
   }
 
-  const supabase = supabaseServer();
-
-  const { data: campaign, error: campaignErr } = await supabase
-    .from("campaigns")
-    .insert({
-      name,
-      description: body.description ?? null,
-      spend_amount: typeof body.spend_amount === "number" ? body.spend_amount : null,
-    })
-    .select("id")
-    .single();
-
-  if (campaignErr || !campaign) {
-    return NextResponse.json(
-      { error: campaignErr?.message ?? "Failed to create campaign" },
-      { status: 500 }
-    );
-  }
-
   const channel = body.channel?.trim() || null;
   const maxAttempts = requestedSlug ? 1 : 5;
   let lastError: string | null = null;
@@ -72,20 +81,17 @@ export async function POST(req: Request) {
     const { data: link, error: linkErr } = await supabase
       .from("links")
       .insert({
-        campaign_id: campaign.id,
+        campaign_id: params.id,
         slug,
         channel,
         original_url: originalUrl,
         tracking_url: tracking,
       })
-      .select("id, slug, tracking_url")
+      .select("id, slug, channel, tracking_url, original_url")
       .single();
 
     if (!linkErr && link) {
-      return NextResponse.json(
-        { campaign_id: campaign.id, link },
-        { status: 201 }
-      );
+      return NextResponse.json({ link }, { status: 201 });
     }
 
     const isUnique =
@@ -94,15 +100,12 @@ export async function POST(req: Request) {
     lastError = linkErr?.message ?? "unknown";
     if (!isUnique) break;
     if (requestedSlug) {
-      await supabase.from("campaigns").delete().eq("id", campaign.id);
       return NextResponse.json(
         { error: "이미 사용 중인 slug 입니다." },
         { status: 409 }
       );
     }
   }
-
-  await supabase.from("campaigns").delete().eq("id", campaign.id);
   return NextResponse.json(
     { error: lastError ?? "Failed to create link" },
     { status: 500 }

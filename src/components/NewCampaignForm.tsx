@@ -2,17 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { QRPreview } from "./QRPreview";
+import { QRCodeCanvas } from "qrcode.react";
 
 export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
   const router = useRouter();
 
   const [name, setName] = useState("");
-  const [hotelName, setHotelName] = useState("");
-  const [channel, setChannel] = useState("");
   const [description, setDescription] = useState("");
   const [originalUrl, setOriginalUrl] = useState("");
+  const [channel, setChannel] = useState("");
   const [slug, setSlug] = useState("");
+  const [spend, setSpend] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +35,14 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
       return setError("원본 URL 형식이 올바르지 않습니다.");
     }
 
+    let spendNum: number | null = null;
+    if (spend.trim()) {
+      const cleaned = Number(spend.replace(/,/g, ""));
+      if (Number.isNaN(cleaned) || cleaned < 0)
+        return setError("사용 금액은 0 이상의 숫자만 입력 가능합니다.");
+      spendNum = cleaned;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch("/api/campaigns", {
@@ -42,16 +50,16 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          hotel_name: hotelName.trim() || null,
-          channel: channel.trim() || null,
           description: description.trim() || null,
           original_url: originalUrl.trim(),
+          channel: channel.trim() || null,
           slug: slug.trim() || undefined,
+          spend_amount: spendNum,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "생성에 실패했습니다.");
-      router.push("/dashboard");
+      router.push(`/dashboard/campaigns/${json.campaign_id}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
@@ -75,25 +83,6 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
           />
         </Field>
 
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="호텔명">
-            <input
-              value={hotelName}
-              onChange={(e) => setHotelName(e.target.value)}
-              placeholder="예: 그랜드 호텔 서울"
-              className={inputCls}
-            />
-          </Field>
-          <Field label="채널">
-            <input
-              value={channel}
-              onChange={(e) => setChannel(e.target.value)}
-              placeholder="예: 인스타그램, 네이버 카페"
-              className={inputCls}
-            />
-          </Field>
-        </div>
-
         <Field label="설명">
           <textarea
             value={description}
@@ -104,7 +93,7 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
           />
         </Field>
 
-        <Field label="원본 URL *">
+        <Field label="원본 URL *" hint="QR 또는 추적 링크 클릭 시 이동할 도착 URL.">
           <input
             value={originalUrl}
             onChange={(e) => setOriginalUrl(e.target.value)}
@@ -116,21 +105,45 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
         </Field>
 
         <Field
-          label="Slug (선택)"
-          hint="비워두면 자동 생성됩니다. 영문/숫자/하이픈/언더스코어만 가능 (2~64자)."
+          label="첫 채널 (선택)"
+          hint="예: Instagram / 네이버 카페 / 매장 팜플렛. 캠페인 생성 후 같은 URL의 다른 채널 QR을 추가로 만들 수 있습니다."
         >
-          <div className="flex items-stretch overflow-hidden rounded-md border border-slate-200 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
-            <span className="bg-slate-50 px-3 py-2 text-sm text-slate-500">
-              {siteUrl}/r/
-            </span>
-            <input
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              placeholder="(자동 생성)"
-              className="flex-1 px-3 py-2 text-sm outline-none"
-            />
-          </div>
+          <input
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+            placeholder="Instagram"
+            className={inputCls}
+          />
         </Field>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field
+            label="Slug (선택)"
+            hint="비워두면 자동 생성. 영문/숫자/하이픈만, 2~64자."
+          >
+            <div className="flex items-stretch overflow-hidden rounded-md border border-slate-200 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
+              <span className="bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                {siteUrl}/r/
+              </span>
+              <input
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder="(자동 생성)"
+                className="flex-1 px-3 py-2 text-sm outline-none"
+              />
+            </div>
+          </Field>
+
+          <Field label="사용 금액 (원, 선택)" hint="나중에 캠페인 상세에서 수정할 수 있습니다.">
+            <input
+              value={spend}
+              onChange={(e) => setSpend(e.target.value)}
+              placeholder="500000"
+              inputMode="numeric"
+              className={inputCls}
+            />
+          </Field>
+        </div>
 
         {error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -151,7 +164,7 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
             disabled={submitting}
             className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? "생성 중..." : "캠페인 + 링크 생성"}
+            {submitting ? "생성 중..." : "캠페인 생성"}
           </button>
         </div>
       </form>
@@ -160,9 +173,16 @@ export function NewCampaignForm({ siteUrl }: { siteUrl: string }) {
         <h3 className="mb-3 text-sm font-semibold text-slate-700">
           QR 코드 미리보기
         </h3>
-        <QRPreview value={previewUrl} filename={previewSlug} />
+        <div className="flex flex-col items-center gap-3">
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <QRCodeCanvas value={previewUrl} size={220} level="M" />
+          </div>
+          <div className="break-all text-center text-xs text-slate-500">
+            {previewUrl}
+          </div>
+        </div>
         <p className="mt-3 text-xs text-slate-400">
-          저장 후 동일한 추적 URL의 QR 코드가 캠페인에 연결됩니다.
+          저장 후 동일한 추적 URL의 QR 코드가 캠페인 상세 페이지에서 다운로드됩니다.
         </p>
       </aside>
     </div>

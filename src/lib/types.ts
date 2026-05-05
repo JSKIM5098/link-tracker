@@ -1,9 +1,12 @@
 export type Campaign = {
   id: string;
   name: string;
-  hotel_name: string | null;
-  channel: string | null;
+  hotel_name: string | null;          // legacy, no longer written
+  channel: string | null;             // legacy, no longer written (moved to links)
   description: string | null;
+  spend_amount: number | null;
+  revenue_amount: number | null;
+  currency: string | null;
   created_at: string;
 };
 
@@ -11,6 +14,7 @@ export type Link = {
   id: string;
   campaign_id: string;
   slug: string;
+  channel: string | null;
   original_url: string;
   tracking_url: string;
   created_at: string;
@@ -28,7 +32,4 @@ export type Click = {
   utm_campaign: string | null;
 };
 
-export type LinkWithCampaign = Link & {
-  campaign: Pick<Campaign, "id" | "name" | "hotel_name" | "channel"> | null;
-  click_count: number;
-};
+export type RangeKey = "7d" | "30d" | "90d" | "all";
